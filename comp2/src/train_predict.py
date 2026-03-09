@@ -1,147 +1,124 @@
 """
-NBA Home Team Point Differential Prediction
-Competition 2 — RMSE minimization
+NBA Home Margin Prediction — Optimized v2
+Key improvement: retrain on FULL data using best_iter found via time-split val.
 """
-
-import warnings
-warnings.filterwarnings("ignore")
-
-import numpy as np
-import pandas as pd
-import lightgbm as lgb
+import warnings; warnings.filterwarnings("ignore")
+import numpy as np, pandas as pd, lightgbm as lgb, os
 from sklearn.metrics import mean_squared_error
-import os
+from sklearn.linear_model import Ridge
+from sklearn.preprocessing import StandardScaler
 
-# ── Paths ────────────────────────────────────────────────────────────────────
-DATA_DIR   = "../data"
-SUBMIT_DIR = "../submissions"
+DATA_DIR, SUBMIT_DIR = "../data", "../submissions"
+train = pd.read_csv(f"{DATA_DIR}/train.csv")
+test  = pd.read_csv(f"{DATA_DIR}/test.csv")
+print(f"Train {train.shape} | Test {test.shape}")
 
-TRAIN_PATH  = f"{DATA_DIR}/train.csv"
-TEST_PATH   = f"{DATA_DIR}/test.csv"
-SUBMIT_PATH = f"{SUBMIT_DIR}/submission.csv"
-
-# ── Load data ────────────────────────────────────────────────────────────────
-train = pd.read_csv(TRAIN_PATH)
-test  = pd.read_csv(TEST_PATH)
-
-print(f"Train shape: {train.shape}  |  seasons {train.season.min()}-{train.season.max()}")
-print(f"Test  shape: {test.shape}   |  seasons {test.season.min()}-{test.season.max()}")
-
-# ── Feature engineering ──────────────────────────────────────────────────────
+# ── Feature engineering ───────────────────────────────────────────────────────
 for df in [train, test]:
-    df["elo_diff_sq"]        = df["elo_diff"] ** 2
-    df["elo_diff_cb"]        = df["elo_diff"] ** 3
-    df["margin_roll5_diff"]  = df["home_margin_roll5"]  - df["away_margin_roll5"]
-    df["margin_roll20_diff"] = df["home_margin_roll20"] - df["away_margin_roll20"]
-    df["home_net_roll5"]     = df["home_pts_roll5"]  - df["home_opp_pts_roll5"]
-    df["away_net_roll5"]     = df["away_pts_roll5"]  - df["away_opp_pts_roll5"]
-    df["net_roll5_diff"]     = df["home_net_roll5"]  - df["away_net_roll5"]
-    df["home_net_roll10"]    = df["home_pts_roll10"] - df["home_opp_pts_roll10"]
-    df["away_net_roll10"]    = df["away_pts_roll10"] - df["away_opp_pts_roll10"]
-    df["net_roll10_diff"]    = df["home_net_roll10"] - df["away_net_roll10"]
-    df["home_net_roll20"]    = df["home_pts_roll20"] - df["home_opp_pts_roll20"]
-    df["away_net_roll20"]    = df["away_pts_roll20"] - df["away_opp_pts_roll20"]
-    df["net_roll20_diff"]    = df["home_net_roll20"] - df["away_net_roll20"]
-    df["win_roll5_diff"]     = df["home_win_roll5"]  - df["away_win_roll5"]
-    df["win_roll10_diff"]    = df["home_win_roll10"] - df["away_win_roll10"]
-    df["elo_delta_diff"]     = df["home_elo_delta_prev1"] - df["away_elo_delta_prev1"]
+    df["elo_diff_sq"]          = df["elo_diff"] ** 2
+    df["elo_diff_cb"]          = df["elo_diff"] ** 3
+    df["margin_roll5_diff"]    = df["home_margin_roll5"]  - df["away_margin_roll5"]
+    df["margin_roll20_diff"]   = df["home_margin_roll20"] - df["away_margin_roll20"]
+    df["home_net_roll5"]       = df["home_pts_roll5"]  - df["home_opp_pts_roll5"]
+    df["away_net_roll5"]       = df["away_pts_roll5"]  - df["away_opp_pts_roll5"]
+    df["net_roll5_diff"]       = df["home_net_roll5"]  - df["away_net_roll5"]
+    df["home_net_roll10"]      = df["home_pts_roll10"] - df["home_opp_pts_roll10"]
+    df["away_net_roll10"]      = df["away_pts_roll10"] - df["away_opp_pts_roll10"]
+    df["net_roll10_diff"]      = df["home_net_roll10"] - df["away_net_roll10"]
+    df["home_net_roll20"]      = df["home_pts_roll20"] - df["home_opp_pts_roll20"]
+    df["away_net_roll20"]      = df["away_pts_roll20"] - df["away_opp_pts_roll20"]
+    df["net_roll20_diff"]      = df["home_net_roll20"] - df["away_net_roll20"]
+    df["win_roll5_diff"]       = df["home_win_roll5"]  - df["away_win_roll5"]
+    df["win_roll10_diff"]      = df["home_win_roll10"] - df["away_win_roll10"]
+    df["elo_delta_diff"]       = df["home_elo_delta_prev1"] - df["away_elo_delta_prev1"]
     df["elo_delta_roll5_diff"] = df["home_elo_delta_roll5"] - df["away_elo_delta_roll5"]
-    df["any_roll_missing"]   = (
+    df["any_roll_missing"]     = (
         df["home_roll_missing_10"].astype(int) | df["away_roll_missing_10"].astype(int) |
         df["home_roll_missing_20"].astype(int) | df["away_roll_missing_20"].astype(int)
     )
+    # Recent-era flag (modern 3-point era scoring is very different from 1950s)
+    df["is_modern"] = (df["season"] >= 1980).astype(int)
 
-# ── Features / target ────────────────────────────────────────────────────────
-DROP_COLS    = ["id", "home_margin", "season"]
-FEATURE_COLS = [c for c in train.columns if c not in DROP_COLS]
-TARGET       = "home_margin"
-
-X_all  = train[FEATURE_COLS]
-y_all  = train[TARGET]
+FEATURE_COLS = [c for c in train.columns if c not in ["id","home_margin","season"]]
+X_all  = train[FEATURE_COLS];  y_all = train["home_margin"]
 X_test = test[FEATURE_COLS]
+print(f"Features: {len(FEATURE_COLS)}")
 
-print(f"\nFeature count: {len(FEATURE_COLS)}")
-
-# ── Time-based validation split ──────────────────────────────────────────────
-VAL_CUTOFF = 2012
-mask_tr  = train["season"] < VAL_CUTOFF
-mask_val = train["season"] >= VAL_CUTOFF
-
-X_tr,  y_tr  = X_all[mask_tr],  y_all[mask_tr]
+# ── Time-based split ──────────────────────────────────────────────────────────
+mask_tr  = train["season"] < 2012
+mask_val = train["season"] >= 2012
+X_tr, y_tr   = X_all[mask_tr],  y_all[mask_tr]
 X_val, y_val = X_all[mask_val], y_all[mask_val]
+print(f"Val split -> train {len(X_tr)} | val {len(X_val)}")
 
-print(f"Train rows: {len(X_tr)}  |  Val rows: {len(X_val)}")
+# ── LGB configs ───────────────────────────────────────────────────────────────
+CONFIGS = [
+    dict(seed=42,  num_leaves=63,  lr=0.02,  rounds=5000, mcs=30),
+    dict(seed=123, num_leaves=63,  lr=0.02,  rounds=5000, mcs=30),
+    dict(seed=7,   num_leaves=63,  lr=0.02,  rounds=5000, mcs=30),
+    dict(seed=17,  num_leaves=63,  lr=0.02,  rounds=5000, mcs=30),
+    dict(seed=31,  num_leaves=95,  lr=0.018, rounds=5000, mcs=25),
+    dict(seed=99,  num_leaves=127, lr=0.015, rounds=6000, mcs=20),
+    dict(seed=55,  num_leaves=127, lr=0.015, rounds=6000, mcs=20),
+]
 
-# ── LightGBM base params ─────────────────────────────────────────────────────
-BASE_PARAMS = {
-    "objective":         "regression",
-    "metric":            "rmse",
-    "learning_rate":     0.02,
-    "num_leaves":        63,
-    "max_depth":         -1,
-    "min_child_samples": 30,
-    "feature_fraction":  0.80,
-    "bagging_fraction":  0.80,
-    "bagging_freq":      5,
-    "reg_alpha":         0.1,
-    "reg_lambda":        1.0,
-    "n_jobs":            -1,
-    "verbose":           -1,
-}
+BASE = dict(objective="regression", metric="rmse", feature_fraction=0.80,
+            bagging_fraction=0.80, bagging_freq=5, reg_alpha=0.1,
+            reg_lambda=1.0, n_jobs=-1, verbose=-1)
 
-lgb_train_ds = lgb.Dataset(X_tr,  label=y_tr)
-lgb_val_ds   = lgb.Dataset(X_val, label=y_val, reference=lgb_train_ds)
-callbacks = [lgb.early_stopping(100, verbose=False), lgb.log_evaluation(200)]
+val_preds, test_preds = [], []
+cb = [lgb.early_stopping(100, verbose=False), lgb.log_evaluation(200)]
 
-val_preds  = []
-test_preds = []
-models     = []
+for cfg in CONFIGS:
+    p = {**BASE, "seed": cfg["seed"], "num_leaves": cfg["num_leaves"],
+         "learning_rate": cfg["lr"], "min_child_samples": cfg["mcs"],
+         "feature_pre_filter": False}
 
-seeds = [42, 123, 7]
-for seed in seeds:
-    params = {**BASE_PARAMS, "seed": seed}
-    print(f"\n-- Training LightGBM seed={seed} --")
-    m = lgb.train(params, lgb_train_ds, num_boost_round=5000,
-                  valid_sets=[lgb_val_ds], callbacks=callbacks)
-    vp = m.predict(X_val)
-    tp = m.predict(X_test)
+    # ① find best iteration on val split
+    ds_tr  = lgb.Dataset(X_tr,  label=y_tr)
+    ds_val = lgb.Dataset(X_val, label=y_val, reference=ds_tr)
+    m = lgb.train(p, ds_tr, num_boost_round=cfg["rounds"],
+                  valid_sets=[ds_val], callbacks=cb)
+    best = m.best_iteration
+    vp   = m.predict(X_val)
     rmse = np.sqrt(mean_squared_error(y_val, vp))
-    print(f"   Val RMSE: {rmse:.4f}  |  best iter: {m.best_iteration}")
-    val_preds.append(vp);  test_preds.append(tp);  models.append(m)
+    print(f"seed={cfg['seed']:3d} nl={cfg['num_leaves']} val={rmse:.4f} iter={best}")
+    val_preds.append(vp)
 
-# Wider tree variant - fresh Dataset to avoid feature_pre_filter conflict
-WIDE_PARAMS = {**BASE_PARAMS, "seed": 99, "num_leaves": 127,
-               "learning_rate": 0.015, "min_child_samples": 20,
-               "feature_pre_filter": False}
-lgb_train_w = lgb.Dataset(X_tr,  label=y_tr)
-lgb_val_w   = lgb.Dataset(X_val, label=y_val, reference=lgb_train_w)
-print("\n-- Training LightGBM seed=99 num_leaves=127 --")
-m = lgb.train(WIDE_PARAMS, lgb_train_w, num_boost_round=6000,
-              valid_sets=[lgb_val_w], callbacks=callbacks)
-vp = m.predict(X_val);  tp = m.predict(X_test)
-rmse = np.sqrt(mean_squared_error(y_val, vp))
-print(f"   Val RMSE: {rmse:.4f}  |  best iter: {m.best_iteration}")
-val_preds.append(vp);  test_preds.append(tp);  models.append(m)
+    # ② retrain on ALL train data with best_iter * 1.05 (more data → more rounds)
+    full_iter = max(best, int(best * 1.05))
+    ds_full = lgb.Dataset(X_all, label=y_all)
+    m_full  = lgb.train(p, ds_full, num_boost_round=full_iter)
+    test_preds.append(m_full.predict(X_test))
+
+# ── Ridge on elo features (fast, linear signal) ───────────────────────────────
+elo_feats = ["elo_diff","elo_diff_sq","elo_diff_cb","elo_delta_diff",
+             "elo_delta_roll5_diff","home_elo_pre","away_elo_pre",
+             "home_elo_delta_prev1","away_elo_delta_prev1",
+             "home_elo_delta_roll5","away_elo_delta_roll5"]
+sc = StandardScaler()
+Xr_tr   = sc.fit_transform(X_tr[elo_feats])
+Xr_val  = sc.transform(X_val[elo_feats])
+Xr_all  = sc.transform(X_all[elo_feats])
+Xr_test = sc.transform(X_test[elo_feats])
+
+for alpha in [0.1, 1.0, 10.0]:
+    r = Ridge(alpha=alpha).fit(Xr_tr, y_tr)
+    vp = r.predict(Xr_val)
+    rmse = np.sqrt(mean_squared_error(y_val, vp))
+    print(f"Ridge a={alpha} val={rmse:.4f}")
+    val_preds.append(vp)
+    r_full = Ridge(alpha=alpha).fit(Xr_all, y_all)
+    test_preds.append(r_full.predict(Xr_test))
 
 # ── Ensemble ──────────────────────────────────────────────────────────────────
 pred_val_ens  = np.mean(val_preds,  axis=0)
 pred_test_ens = np.mean(test_preds, axis=0)
 rmse_ens = np.sqrt(mean_squared_error(y_val, pred_val_ens))
-print(f"\n====  Ensemble Val RMSE ({len(models)}-model avg): {rmse_ens:.4f}  ====")
+print(f"\n==== Ensemble Val RMSE ({len(val_preds)} models): {rmse_ens:.4f} ====")
 
-# ── Feature importance ────────────────────────────────────────────────────────
-fi = pd.DataFrame({
-    "feature":    models[0].feature_name(),
-    "importance": models[0].feature_importance("gain"),
-}).sort_values("importance", ascending=False)
-print("\nTop-15 features (model 0 gain):")
-print(fi.head(15).to_string(index=False))
-
-# ── Save submission ───────────────────────────────────────────────────────────
+# ── Save ──────────────────────────────────────────────────────────────────────
 os.makedirs(SUBMIT_DIR, exist_ok=True)
-submission = pd.DataFrame({"id": test["id"], "home_margin": pred_test_ens})
-submission.to_csv(SUBMIT_PATH, index=False)
-
-print(f"\nsubmission.csv saved -> {SUBMIT_PATH}")
-print(f"  Rows: {len(submission)}  id range: {submission.id.min()}-{submission.id.max()}")
-print(submission.head())
+sub = pd.DataFrame({"id": test["id"], "home_margin": pred_test_ens})
+sub.to_csv(f"{SUBMIT_DIR}/submission.csv", index=False)
+print(f"Saved {len(sub)} rows. id range {sub.id.min()}-{sub.id.max()}")
