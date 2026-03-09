@@ -1,12 +1,14 @@
 """
-NBA Home Margin Prediction — Optimized v2
-Key improvement: retrain on FULL data using best_iter found via time-split val.
+NBA Home Margin Prediction - v3
+Key changes vs v2:
+  - Remove Ridge (val RMSE 12.00, hurts ensemble)
+  - Add XGBoost models for true algorithm diversity
+  - Add lower-LR / higher-reg LGB configs
+  - Weighted ensemble by 1/rmse^2
 """
 import warnings; warnings.filterwarnings("ignore")
-import numpy as np, pandas as pd, lightgbm as lgb, os
+import numpy as np, pandas as pd, lightgbm as lgb, xgboost as xgb, os
 from sklearn.metrics import mean_squared_error
-from sklearn.linear_model import Ridge
-from sklearn.preprocessing import StandardScaler
 
 DATA_DIR, SUBMIT_DIR = "../data", "../submissions"
 train = pd.read_csv(f"{DATA_DIR}/train.csv")
@@ -36,7 +38,6 @@ for df in [train, test]:
         df["home_roll_missing_10"].astype(int) | df["away_roll_missing_10"].astype(int) |
         df["home_roll_missing_20"].astype(int) | df["away_roll_missing_20"].astype(int)
     )
-    # Recent-era flag (modern 3-point era scoring is very different from 1950s)
     df["is_modern"] = (df["season"] >= 1980).astype(int)
 
 FEATURE_COLS = [c for c in train.columns if c not in ["id","home_margin","season"]]
@@ -51,8 +52,11 @@ X_tr, y_tr   = X_all[mask_tr],  y_all[mask_tr]
 X_val, y_val = X_all[mask_val], y_all[mask_val]
 print(f"Val split -> train {len(X_tr)} | val {len(X_val)}")
 
-# ── LGB configs ───────────────────────────────────────────────────────────────
-CONFIGS = [
+val_preds, test_preds, val_rmses = [], [], []
+
+# ── LightGBM configs ──────────────────────────────────────────────────────────
+LGB_CONFIGS = [
+    # Standard configs
     dict(seed=42,  num_leaves=63,  lr=0.02,  rounds=5000, mcs=30),
     dict(seed=123, num_leaves=63,  lr=0.02,  rounds=5000, mcs=30),
     dict(seed=7,   num_leaves=63,  lr=0.02,  rounds=5000, mcs=30),
@@ -60,21 +64,25 @@ CONFIGS = [
     dict(seed=31,  num_leaves=95,  lr=0.018, rounds=5000, mcs=25),
     dict(seed=99,  num_leaves=127, lr=0.015, rounds=6000, mcs=20),
     dict(seed=55,  num_leaves=127, lr=0.015, rounds=6000, mcs=20),
+    # Lower LR / more regularized (better generalization)
+    dict(seed=201, num_leaves=63,  lr=0.01,  rounds=8000, mcs=30),
+    dict(seed=202, num_leaves=63,  lr=0.01,  rounds=8000, mcs=30),
+    dict(seed=77,  num_leaves=255, lr=0.01,  rounds=8000, mcs=15),
 ]
 
-BASE = dict(objective="regression", metric="rmse", feature_fraction=0.80,
-            bagging_fraction=0.80, bagging_freq=5, reg_alpha=0.1,
-            reg_lambda=1.0, n_jobs=-1, verbose=-1)
+LGB_BASE = dict(objective="regression", metric="rmse",
+                feature_fraction=0.80, bagging_fraction=0.80, bagging_freq=5,
+                reg_alpha=0.1, reg_lambda=1.0, n_jobs=-1, verbose=-1,
+                feature_pre_filter=False)
 
-val_preds, test_preds = [], []
-cb = [lgb.early_stopping(100, verbose=False), lgb.log_evaluation(200)]
+cb = [lgb.early_stopping(100, verbose=False), lgb.log_evaluation(500)]
 
-for cfg in CONFIGS:
-    p = {**BASE, "seed": cfg["seed"], "num_leaves": cfg["num_leaves"],
-         "learning_rate": cfg["lr"], "min_child_samples": cfg["mcs"],
-         "feature_pre_filter": False}
+print("\n=== LightGBM ===")
+for cfg in LGB_CONFIGS:
+    p = {**LGB_BASE, "seed": cfg["seed"], "num_leaves": cfg["num_leaves"],
+         "learning_rate": cfg["lr"], "min_child_samples": cfg["mcs"]}
 
-    # ① find best iteration on val split
+    # find best iter on val split
     ds_tr  = lgb.Dataset(X_tr,  label=y_tr)
     ds_val = lgb.Dataset(X_val, label=y_val, reference=ds_tr)
     m = lgb.train(p, ds_tr, num_boost_round=cfg["rounds"],
@@ -82,43 +90,66 @@ for cfg in CONFIGS:
     best = m.best_iteration
     vp   = m.predict(X_val)
     rmse = np.sqrt(mean_squared_error(y_val, vp))
-    print(f"seed={cfg['seed']:3d} nl={cfg['num_leaves']} val={rmse:.4f} iter={best}")
-    val_preds.append(vp)
+    print(f"  seed={cfg['seed']:3d} nl={cfg['num_leaves']:3d} lr={cfg['lr']} "
+          f"val={rmse:.4f} iter={best}")
+    val_preds.append(vp); val_rmses.append(rmse)
 
-    # ② retrain on ALL train data with best_iter * 1.05 (more data → more rounds)
+    # retrain on ALL train data
     full_iter = max(best, int(best * 1.05))
     ds_full = lgb.Dataset(X_all, label=y_all)
     m_full  = lgb.train(p, ds_full, num_boost_round=full_iter)
     test_preds.append(m_full.predict(X_test))
 
-# ── Ridge on elo features (fast, linear signal) ───────────────────────────────
-elo_feats = ["elo_diff","elo_diff_sq","elo_diff_cb","elo_delta_diff",
-             "elo_delta_roll5_diff","home_elo_pre","away_elo_pre",
-             "home_elo_delta_prev1","away_elo_delta_prev1",
-             "home_elo_delta_roll5","away_elo_delta_roll5"]
-sc = StandardScaler()
-Xr_tr   = sc.fit_transform(X_tr[elo_feats])
-Xr_val  = sc.transform(X_val[elo_feats])
-Xr_all  = sc.transform(X_all[elo_feats])
-Xr_test = sc.transform(X_test[elo_feats])
+# ── XGBoost configs ───────────────────────────────────────────────────────────
+XGB_CONFIGS = [
+    dict(seed=42,  max_depth=6, lr=0.02,  rounds=5000, mcw=30, ss=0.80, cs=0.80),
+    dict(seed=123, max_depth=5, lr=0.02,  rounds=5000, mcw=25, ss=0.80, cs=0.80),
+    dict(seed=7,   max_depth=7, lr=0.015, rounds=6000, mcw=20, ss=0.80, cs=0.70),
+    dict(seed=99,  max_depth=6, lr=0.01,  rounds=8000, mcw=30, ss=0.80, cs=0.80),
+]
 
-for alpha in [0.1, 1.0, 10.0]:
-    r = Ridge(alpha=alpha).fit(Xr_tr, y_tr)
-    vp = r.predict(Xr_val)
+print("\n=== XGBoost ===")
+for cfg in XGB_CONFIGS:
+    p = dict(
+        objective="reg:squarederror", eval_metric="rmse",
+        learning_rate=cfg["lr"], max_depth=cfg["max_depth"],
+        min_child_weight=cfg["mcw"], subsample=cfg["ss"],
+        colsample_bytree=cfg["cs"], reg_alpha=0.1, reg_lambda=1.0,
+        seed=cfg["seed"], nthread=-1, verbosity=0,
+    )
+    dtrain = xgb.DMatrix(X_tr,  label=y_tr)
+    dval   = xgb.DMatrix(X_val, label=y_val)
+    dtest  = xgb.DMatrix(X_test)
+    dall   = xgb.DMatrix(X_all, label=y_all)
+
+    m = xgb.train(p, dtrain, num_boost_round=cfg["rounds"],
+                  evals=[(dval, "val")],
+                  early_stopping_rounds=100, verbose_eval=False)
+    best = m.best_iteration + 1
+    vp   = m.predict(dval)
     rmse = np.sqrt(mean_squared_error(y_val, vp))
-    print(f"Ridge a={alpha} val={rmse:.4f}")
-    val_preds.append(vp)
-    r_full = Ridge(alpha=alpha).fit(Xr_all, y_all)
-    test_preds.append(r_full.predict(Xr_test))
+    print(f"  seed={cfg['seed']:3d} md={cfg['max_depth']} lr={cfg['lr']} "
+          f"val={rmse:.4f} iter={best}")
+    val_preds.append(vp); val_rmses.append(rmse)
 
-# ── Ensemble ──────────────────────────────────────────────────────────────────
-pred_val_ens  = np.mean(val_preds,  axis=0)
-pred_test_ens = np.mean(test_preds, axis=0)
+    full_iter = max(best, int(best * 1.05))
+    m_full = xgb.train(p, dall, num_boost_round=full_iter, verbose_eval=False)
+    test_preds.append(m_full.predict(xgb.DMatrix(X_test)))
+
+# ── Weighted ensemble (1/rmse^2) ──────────────────────────────────────────────
+val_rmses = np.array(val_rmses)
+weights = 1.0 / (val_rmses ** 2)
+weights /= weights.sum()
+
+pred_val_ens  = np.average(val_preds,  axis=0, weights=weights)
+pred_test_ens = np.average(test_preds, axis=0, weights=weights)
 rmse_ens = np.sqrt(mean_squared_error(y_val, pred_val_ens))
-print(f"\n==== Ensemble Val RMSE ({len(val_preds)} models): {rmse_ens:.4f} ====")
+
+print(f"\n==== Weighted Ensemble RMSE ({len(val_preds)} models): {rmse_ens:.4f} ====")
+print("Model RMSEs:", [f"{r:.4f}" for r in sorted(val_rmses)])
 
 # ── Save ──────────────────────────────────────────────────────────────────────
 os.makedirs(SUBMIT_DIR, exist_ok=True)
 sub = pd.DataFrame({"id": test["id"], "home_margin": pred_test_ens})
 sub.to_csv(f"{SUBMIT_DIR}/submission.csv", index=False)
-print(f"Saved {len(sub)} rows. id range {sub.id.min()}-{sub.id.max()}")
+print(f"Saved {len(sub)} rows | id {sub.id.min()}-{sub.id.max()}")
