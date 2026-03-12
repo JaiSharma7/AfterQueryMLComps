@@ -1,0 +1,42 @@
+V5: LGB+XGB+HGB | Train=27311 Test=6828
+Features built. comb shape: (34139, 459)
+Features: 492
+Loaded V2 LGB params (trial RMSE=16.0405)
+
+STEP 1: 5-fold CV
+  fold 1: LGB=20.8798(n=99)  XGB=21.5089(n=124)  HGB=19.8272  (216s)
+  fold 2: LGB=14.8600(n=80)  XGB=14.7334(n=82)  HGB=14.7820  (248s)
+  fold 3: LGB=14.4951(n=128)  XGB=14.9169(n=162)  HGB=14.6525  (293s)
+  fold 4: LGB=9.4736(n=147)  XGB=9.5388(n=158)  HGB=9.3049  (362s)
+  fold 5: LGB=20.1064(n=279)  XGB=21.9167(n=284)  HGB=20.3053  (459s)
+
+  LGB OOF: 16.4980  XGB OOF: 17.1671  HGB OOF: 16.2801
+  CV total: 26.3min
+
+STEP 2: Optuna blend (600 trials) ...
+  Blend RMSE: 16.2186  wLGB=0.317  wXGB=0.000  wHGB=0.683
+
+STEP 3: Final models on all training data ...
+  LGB n=200
+  XGB n=200
+  HGB done
+
+STEP 4: Recursive test prediction ...
+  1000/6828 rows  last=49.6
+  2000/6828 rows  last=43.3
+  3000/6828 rows  last=46.5
+  4000/6828 rows  last=89.7
+  5000/6828 rows  last=9.9
+  6000/6828 rows  last=105.3
+  Recursive done in 28767.1s
+
+=======================================================
+V5 COMPLETE
+  LGB OOF:   16.4980
+  XGB OOF:   17.1671
+  HGB OOF:   16.2801
+  Blend OOF: 16.2186  (wL=0.317 wX=0.000 wH=0.683)
+  Features:  492
+  Pred stats: min=3.8  mean=75.2  max=519.5
+  Saved: C:\Users\jaish\Downloads\submission_v5.csv
+=======================================================

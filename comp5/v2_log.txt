@@ -1,0 +1,92 @@
+============================================================
+V2 PIPELINE START
+Train (27311, 18)  Test (6828, 17)
+Wind + temporal done
+Imputing base features...
+Building exogenous lag/rolling/EWMA features...
+Combined exog shape: (34139, 434)
+Building PM2.5 autoregressive features on training set...
+train_feat: (27311, 473)  test_feat: (6828, 471)
+Total features: 466
+
+STEP 9: LightGBM CV
+    LGB fold 1: RMSE=20.9934  iter=129
+    LGB fold 2: RMSE=15.2365  iter=70
+    LGB fold 3: RMSE=14.7653  iter=124
+    LGB fold 4: RMSE=9.3236  iter=112
+    LGB fold 5: RMSE=20.6194  iter=237
+  LGB OOF RMSE: 16.7510  avg_iter=134
+  done 85s
+
+STEP 10: XGBoost CV
+    XGB fold 1: RMSE=20.7574  iter=103
+    XGB fold 2: RMSE=14.5900  iter=78
+    XGB fold 3: RMSE=14.9188  iter=123
+    XGB fold 4: RMSE=9.2587  iter=144
+    XGB fold 5: RMSE=22.5665  iter=232
+  XGB OOF RMSE: 17.0955  avg_iter=136
+  done 39s
+
+STEP 11: HGBR CV
+    HGB fold 1: RMSE=20.7624  iter=0
+    HGB fold 2: RMSE=14.6154  iter=0
+    HGB fold 3: RMSE=14.8942  iter=0
+    HGB fold 4: RMSE=9.1589  iter=0
+    HGB fold 5: RMSE=20.4338  iter=0
+  HGB OOF RMSE: 16.5405  avg_iter=0
+  done 229s
+
+STEP 11b: CatBoost CV
+    CAT fold 1: RMSE=26.8777  iter=199
+    CAT fold 2: RMSE=16.3460  iter=198
+    CAT fold 3: RMSE=17.1753  iter=199
+    CAT fold 4: RMSE=11.2362  iter=199
+    CAT fold 5: RMSE=29.9323  iter=199
+  CAT OOF RMSE: 21.4792  avg_iter=198
+  done 58s
+
+Baseline summary: LGB=16.7510  XGB=17.0955  HGB=16.5405  CAT=21.4792
+
+STEP 12: Optuna LightGBM (50 trials, 3-fold)...
+  Optuna best: 16.0405  (734s)
+  Params: {'lr': 0.04151536263666175, 'nl': 349, 'mcs': 32, 'ff': 0.9530407305670208, 'bf': 0.8382592729244714, 'ra': 0.00944574659647622, 'rl': 0.15941173204899103, 'msg': 0.04463521402491388}
+    LGB_tuned fold 1: RMSE=18.1073  iter=44
+    LGB_tuned fold 2: RMSE=15.1808  iter=33
+    LGB_tuned fold 3: RMSE=14.8439  iter=66
+    LGB_tuned fold 4: RMSE=9.5776  iter=64
+    LGB_tuned fold 5: RMSE=20.5474  iter=177
+  LGB_tuned OOF RMSE: 16.0785  avg_iter=76
+  Using TUNED LGB
+
+STEP 12b: Stacking meta-learner...
+  Stack OOF RMSE: 16.5508  weights=[0.301 0.407 0.106 0.197]
+  Equal blend RMSE: 17.2252
+  Optuna blend RMSE: 15.9873  w=[0.669 0.001 0.33  0.   ]
+  Using OPTUNA BLEND weights
+
+STEP 13: Final model training on full data...
+  LGB trained n=200
+  XGB trained n=200
+  HGB trained
+  CAT trained n=200
+
+STEP 14: Recursive test prediction (row by row)...
+    Predicted 1000/6828 rows  last_pred=46.7
+    Predicted 2000/6828 rows  last_pred=44.3
+    Predicted 3000/6828 rows  last_pred=41.0
+    Predicted 4000/6828 rows  last_pred=86.1
+    Predicted 5000/6828 rows  last_pred=9.4
+    Predicted 6000/6828 rows  last_pred=99.8
+  Recursive prediction done in 55s
+
+Saved: C:\Users\jaish\OneDrive - The University of Texas at Austin\Documents\AfterQueryMLComps\comp5\submission_v2.csv
+Pred stats: min=3.7  mean=74.01  max=517.1
+
+============================================================
+V2 COMPLETE
+  LGB OOF RMSE:   16.0785
+  XGB OOF RMSE:   17.0955
+  HGB OOF RMSE:   16.5405
+  CAT OOF RMSE:   21.4792
+  Ensemble RMSE:  15.9873
+============================================================

@@ -1,0 +1,49 @@
+[  0.0m] Loading data...
+[  0.0m] Train=27311  Test=6828
+[  0.0m] Exog features built. comb: (34139, 646)
+[  0.0m] AR features: 679  NoAR features: 640
+[  0.1m] Loaded V2 params
+[  0.1m] 
+=== 3-Fold CV (AR + No-AR simultaneously) ===
+[  3.2m]   fold 1: AR-LGB=18.4603(n=86)  AR-HGB=17.0404  NoAR-LGB=29.3612(n=66)  NoAR-HGB=26.5130  (191s)
+[  7.3m]   fold 2: AR-LGB=13.3462(n=157)  AR-HGB=13.3702  NoAR-LGB=21.0640(n=205)  NoAR-HGB=21.8977  (245s)
+[ 11.9m]   fold 3: AR-LGB=17.2323(n=403)  AR-HGB=16.6277  NoAR-LGB=28.5922(n=277)  NoAR-HGB=29.8928  (275s)
+[ 11.9m] 
+  AR-LGB  OOF: 16.4910
+[ 11.9m]   AR-HGB  OOF: 15.7651
+[ 11.9m]   NoAR-LGB OOF: 26.6038
+[ 11.9m]   NoAR-HGB OOF: 26.3061
+[ 11.9m] 
+Blend optimization (400 trials)...
+[ 12.0m]   Blend OOF: 15.7652  wAR_L=0.000 wAR_H=1.000 wNAR_L=0.000 wNAR_H=0.000
+[ 12.0m] 
+Final training on all data...
+[ 12.7m]   AR-LGB n=215
+[ 14.6m]   AR-HGB done
+[ 15.5m]   NoAR-LGB n=182
+[ 17.7m]   NoAR-HGB done
+[ 17.7m] 
+No-AR test prediction (direct)...
+[ 17.7m]   NoAR predictions done
+[ 17.7m] 
+AR recursive test prediction...
+[ 19.1m]   1000/6828 (80s) last=51.8
+[ 20.6m]   2000/6828 (172s) last=41.0
+[ 22.1m]   3000/6828 (265s) last=43.3
+[ 23.3m]   4000/6828 (336s) last=88.8
+[ 24.8m]   5000/6828 (422s) last=10.6
+[ 26.1m]   6000/6828 (500s) last=100.0
+[ 27.3m]   AR done in 575s
+[ 27.3m] 
+============================================================
+[ 27.3m] V7 COMPLETE  (27.3 min total)
+[ 27.3m]   AR-LGB  OOF: 16.4910
+[ 27.3m]   AR-HGB  OOF: 15.7651
+[ 27.3m]   NoAR-LGB OOF: 26.6038
+[ 27.3m]   NoAR-HGB OOF: 26.3061
+[ 27.3m]   Blend OOF: 15.7652  [0.00*AR_LGB + 1.00*AR_HGB + 0.00*NAR_LGB + 0.00*NAR_HGB]
+[ 27.3m]   Pred (blend): min=3.9  mean=74.9  max=516.8
+[ 27.3m]   Pred (AR):    min=3.9  mean=74.9  max=516.8
+[ 27.3m]   AR+NoAR blend saved: C:\Users\jaish\Downloads\submission_v7.csv
+[ 27.3m]   AR-only saved:       C:\Users\jaish\Downloads\submission_v7_ar.csv
+[ 27.3m] ============================================================
