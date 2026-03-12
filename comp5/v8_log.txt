@@ -1,0 +1,35 @@
+[  0.0m] Loading data...
+[  0.0m] Computing historical PM2.5 stats from training...
+[  0.0m] Exog features built. comb shape: (34139, 365)
+[  0.0m] Total features: 372  (PM2.5 lags: 13)
+[  0.1m] 
+=== 5-fold CV ===
+[  1.6m]   fold 1: HGB=27.6285  LGB=26.3838(n=148)  (92s)
+[  3.5m]   fold 2: HGB=22.4970  LGB=25.1108(n=55)  (115s)
+[  6.3m]   fold 3: HGB=20.2839  LGB=20.4212(n=156)  (171s)
+[  9.1m]   fold 4: HGB=17.5459  LGB=17.3722(n=200)  (163s)
+[ 12.3m]   fold 5: HGB=29.9477  LGB=27.8014(n=533)  (196s)
+[ 12.3m] 
+  HGB OOF: 24.0233  LGB OOF: 23.7419
+[ 12.3m]   Blend OOF: 23.6250  wHGB=0.355 wLGB=0.645
+[ 12.3m] 
+Final training on all data...
+[ 15.9m]   HGB done
+[ 17.0m]   LGB done (n=218)
+[ 17.0m] 
+Recursive test prediction (long-lag AR only)...
+[ 19.6m]   1000/6828 (158s) last=43.0
+[ 21.9m]   2000/6828 (295s) last=36.4
+[ 23.6m]   3000/6828 (396s) last=38.6
+[ 25.7m]   4000/6828 (522s) last=98.0
+[ 27.4m]   5000/6828 (628s) last=9.5
+[ 29.5m]   6000/6828 (754s) last=104.0
+[ 32.5m]   Recursive done in 933s
+[ 32.5m] 
+============================================================
+[ 32.5m] V8 COMPLETE  (32.5 min total)
+[ 32.5m]   HGB OOF: 24.0233  LGB OOF: 23.7419  Blend: 23.6250
+[ 32.5m]   Features: 372  PM2.5 lags: [24, 48, 72, 168, 336]
+[ 32.5m]   Pred: min=3.7  mean=73.4  max=483.0
+[ 32.5m]   Saved: C:\Users\jaish\Downloads\submission_v8.csv
+[ 32.5m] ============================================================

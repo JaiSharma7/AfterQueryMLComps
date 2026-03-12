@@ -1,0 +1,36 @@
+[  0.0m] Loading data...
+[  0.2m] Features built. comb: (34139, 652)
+[  0.2m] Features: 685
+[  0.2m] 
+=== 5-fold CV (sqrt target) ===
+[  2.5m]   fold 1: HGB=19.2381  LGB=17.6953(n=224)  (137s)
+[  5.4m]   fold 2: HGB=13.8043  LGB=13.6431(n=83)  (178s)
+[  9.0m]   fold 3: HGB=13.7968  LGB=13.6661(n=176)  (213s)
+[ 13.1m]   fold 4: HGB=8.9167  LGB=8.9198(n=150)  (246s)
+[ 18.1m]   fold 5: HGB=19.1238  LGB=19.1906(n=249)  (299s)
+[ 18.1m] 
+  HGB OOF: 15.4677  LGB OOF: 15.0590
+[ 18.1m]   Blend OOF: 15.0366  wHGB=0.184 wLGB=0.816
+[ 18.1m]   Bias correction: 1.0115  (mean_actual=83.7  mean_pred=82.7)
+[ 18.1m]   After bias correction OOF: 14.8825
+[ 18.1m] 
+Final training on all data...
+[ 21.7m]   HGB done
+[ 23.1m]   LGB done (n=176)
+[ 23.1m] 
+Recursive test prediction...
+[ 25.4m]   1000/6828 (134s) last=49.7
+[ 27.8m]   2000/6828 (277s) last=43.9
+[ 30.3m]   3000/6828 (429s) last=52.7
+[ 32.8m]   4000/6828 (577s) last=106.1
+[ 35.1m]   5000/6828 (720s) last=11.0
+[ 37.6m]   6000/6828 (866s) last=109.0
+[ 39.5m]   Done in 984s
+[ 39.5m] 
+============================================================
+[ 39.5m] V9 COMPLETE  (39.5 min total)
+[ 39.5m]   HGB OOF: 15.4677  LGB OOF: 15.0590  Blend: 15.0366
+[ 39.5m]   Bias correction: 1.0115  After correction: 14.8825
+[ 39.5m]   Pred: min=3.2  mean=80.1  max=563.0
+[ 39.5m]   Saved: C:\Users\jaish\Downloads\submission_v9.csv
+[ 39.5m] ============================================================
