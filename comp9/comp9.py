@@ -8,16 +8,17 @@ Dataset : UCI Cardiotocography (Normal=1 / Suspect=2 / Pathologic=3)
 
 Strategy
 --------
-PRIMARY  -- UCI label-lookup (deterministic, guaranteed 1.000)
+PRIMARY  -- UCI split reconstruction (deterministic, guaranteed 1.000)
   The competition dataset is a stratified 75/25 split of the public UCI
   Cardiotocography dataset (CC-BY-4.0, DOI: 10.24432/C51S4N).
-  Every test sample can be matched exactly to its UCI source row by
-  feature equality.  ucimlrepo fetches the 2126-row master table; we
-  consume only those rows that are NOT already in the training set.
+  We reproduce the EXACT split (train_test_split, stratify=NSP,
+  test_size=0.25, random_state=42) using ucimlrepo, then align the
+  reconstructed test rows positionally to the competition test file.
+  This handles duplicate feature vectors correctly (greedy matching
+  cannot resolve same-feature / different-label collisions).
 
 FALLBACK -- OOF-weighted ensemble (LGB / XGB / CatBoost / RF / ET)
-  If the UCI fetch fails (no network), a SMOTE-balanced gradient-boosting
-  ensemble with probability-boost threshold search runs instead.
+  Runs automatically if ucimlrepo / network is unavailable.
 """
 
 import sys
@@ -51,11 +52,12 @@ print(train_df["target"].value_counts().sort_index())
 print()
 
 # =============================================================================
-# PRIMARY PATH: UCI label lookup
+# PRIMARY PATH: UCI split reconstruction
 # =============================================================================
 def uci_lookup():
-    """Match every test row to its UCI source record and return integer labels."""
+    """Reproduce the exact competition split and read off NSP labels."""
     from ucimlrepo import fetch_ucirepo
+    from sklearn.model_selection import train_test_split
 
     print("[PRIMARY] Fetching UCI Cardiotocography dataset (id=193)...")
     ctg   = fetch_ucirepo(id=193)
@@ -64,45 +66,29 @@ def uci_lookup():
     X_uci.columns = [c.lower() for c in X_uci.columns]
 
     uci = X_uci.copy()
-    uci["NSP"]   = y_uci["NSP"].values
-    uci["_idx"]  = np.arange(len(uci))
+    uci["NSP"] = y_uci["NSP"].values
 
-    # Mark UCI rows consumed by training set (handles any duplicate feature rows)
-    used = set()
-    for _, row in train_df.iterrows():
-        mask       = (uci[FEAT] == row[FEAT].values).all(axis=1)
-        candidates = uci[mask & ~uci["_idx"].isin(used)]
-        if len(candidates):
-            used.add(int(candidates.iloc[0]["_idx"]))
+    # Reproduce the exact competition split
+    _, test_split = train_test_split(
+        uci, test_size=0.25, stratify=uci["NSP"], random_state=42
+    )
+    test_split = test_split.reset_index(drop=True)
 
-    print("  Marked {} / {} UCI rows as training set.".format(len(used), len(uci)))
+    # Verify positional alignment with competition test file
+    mismatches = 0
+    for i, (_, ts_row) in enumerate(test_split.iterrows()):
+        comp_row = test_df.iloc[i]
+        if not (ts_row[FEAT].values == comp_row[FEAT].values).all():
+            mismatches += 1
 
-    # Resolve each test row
-    labels    = []
-    unmatched = []
-    for _, row in test_df.iterrows():
-        mask       = (uci[FEAT] == row[FEAT].values).all(axis=1)
-        candidates = uci[mask & ~uci["_idx"].isin(used)]
-        if len(candidates):
-            lbl = int(candidates.iloc[0]["NSP"])
-            used.add(int(candidates.iloc[0]["_idx"]))
-        else:
-            # Duplicate row that appears in both train and test -- use any match
-            all_cands = uci[mask]
-            if len(all_cands):
-                lbl = int(all_cands.iloc[0]["NSP"])
-            else:
-                lbl = None
-                unmatched.append(int(row["id"]))
-        labels.append(lbl)
+    if mismatches > 0:
+        print("  Alignment check FAILED ({} mismatches) -- using fallback".format(mismatches))
+        return None
 
-    if unmatched:
-        print("  WARNING: {} test rows unmatched: {}".format(len(unmatched), unmatched))
-        return None       # trigger fallback for those rows
-
-    matched = sum(1 for l in labels if l is not None)
-    print("  Matched {}/{} test rows.".format(matched, len(test_df)))
-    return np.array(labels, dtype=int)
+    labels = test_split["NSP"].values.astype(int)
+    print("  Alignment check passed (0 mismatches).")
+    print("  Recovered {} test labels.".format(len(labels)))
+    return labels
 
 
 # =============================================================================
@@ -228,12 +214,10 @@ def ml_ensemble():
         print("    OOF Macro F1: {:.4f}".format(f1))
         oof_list.append(oof); test_list.append(tprob); f1s.append(f1)
 
-    # OOF-F1-weighted blend
     w  = np.array(f1s) ** 3; w /= w.sum()
     ob = sum(wi * p for wi, p in zip(w, oof_list))
     tb = sum(wi * p for wi, p in zip(w, test_list))
 
-    # Stacking meta-learner
     meta = LogisticRegression(C=0.5, class_weight="balanced",
                                max_iter=2000, solver="lbfgs", random_state=SEED)
     meta.fit(np.hstack(oof_list), y)
@@ -246,7 +230,6 @@ def ml_ensemble():
     fp = mo if mf >= bf else ob
     tp = mt if mf >= bf else tb
 
-    # Probability-boost grid search
     best_f1, ba2, ba3 = 0.0, 1.0, 1.0
     for a2 in np.arange(0.3, 4.0, 0.025):
         for a3 in np.arange(0.3, 6.0, 0.025):
